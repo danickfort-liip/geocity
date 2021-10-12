@@ -1,8 +1,12 @@
 import json
+from collections import defaultdict
+
 from constance import config
 from datetime import date, datetime, timedelta
 
 from bootstrap_datepicker_plus import DatePickerInput, DateTimePickerInput
+from crispy_forms.helper import FormHelper
+from crispy_forms.layout import Layout, Submit, Fieldset, ButtonHolder, Div, HTML
 from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
@@ -20,8 +24,18 @@ from django.core.exceptions import ValidationError
 from itertools import groupby
 from django.db.models import Q
 
-
 from . import models, services
+
+input_type_mapping = {
+    models.WorksObjectProperty.INPUT_TYPE_TEXT: forms.CharField,
+    models.WorksObjectProperty.INPUT_TYPE_CHECKBOX: forms.BooleanField,
+    models.WorksObjectProperty.INPUT_TYPE_NUMBER: forms.FloatField,
+    models.WorksObjectProperty.INPUT_TYPE_FILE: forms.FileField,
+    models.WorksObjectProperty.INPUT_TYPE_ADDRESS: forms.CharField,
+    models.WorksObjectProperty.INPUT_TYPE_DATE: forms.DateField,
+    models.WorksObjectProperty.INPUT_TYPE_LIST_SINGLE: forms.ChoiceField,
+    models.WorksObjectProperty.INPUT_TYPE_LIST_MULTIPLE: forms.MultipleChoiceField
+}
 
 
 class AddressWidget(forms.widgets.TextInput):
@@ -61,17 +75,6 @@ class AddressWidget(forms.widgets.TextInput):
 
 
 def get_field_cls_for_property(prop):
-    input_type_mapping = {
-        models.WorksObjectProperty.INPUT_TYPE_TEXT: forms.CharField,
-        models.WorksObjectProperty.INPUT_TYPE_CHECKBOX: forms.BooleanField,
-        models.WorksObjectProperty.INPUT_TYPE_NUMBER: forms.FloatField,
-        models.WorksObjectProperty.INPUT_TYPE_FILE: forms.FileField,
-        models.WorksObjectProperty.INPUT_TYPE_ADDRESS: forms.CharField,
-        models.WorksObjectProperty.INPUT_TYPE_DATE: forms.DateField,
-        models.WorksObjectProperty.INPUT_TYPE_LIST_SINGLE: forms.ChoiceField,
-        models.WorksObjectProperty.INPUT_TYPE_LIST_MULTIPLE: forms.MultipleChoiceField,
-    }
-
     try:
         return input_type_mapping[prop.input_type]
     except KeyError as e:
@@ -90,7 +93,6 @@ class GroupedRadioWidget(forms.RadioSelect):
 
 
 class AdministrativeEntityForm(forms.Form):
-
     administrative_entity = forms.ModelChoiceField(
         label=_("Entité administrative"),
         widget=GroupedRadioWidget(),
@@ -203,8 +205,8 @@ class WorksObjectsForm(forms.Form):
                 works_type.works_object_types.filter(
                     administrative_entities=self.instance.administrative_entity,
                 )
-                .distinct()
-                .select_related("works_object")
+                    .distinct()
+                    .select_related("works_object")
             )
 
             if not user_has_perm:
@@ -260,16 +262,34 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
 
         super().__init__(*args, **kwargs)
 
+        fields_per_work_object = defaultdict(list)
         # Create a field for each property
         for works_object_type, prop in self.get_properties():
             field_name = self.get_field_name(works_object_type, prop)
-            self.fields[field_name] = self.field_for_property(prop)
-            if prop.is_mandatory:
-                self.fields[field_name].required = True
+            if prop.is_value_property():
+                fields_per_work_object[str(works_object_type)].append(field_name)
+                self.fields[field_name] = self.field_for_property(prop)
+                if prop.is_mandatory:
+                    self.fields[field_name].required = True
+            else:
+                fields_per_work_object[str(works_object_type)].append(
+                    self.non_field_value_for_property(prop)
+                )
 
         if disable_fields:
             for field in self.fields.values():
                 field.disabled = True
+
+        fieldsets = []
+        for work_object_type_str, fieldset_fields in fields_per_work_object.items():
+            fieldset_fields = [work_object_type_str] + fieldset_fields
+            fieldsets.append(Fieldset(*fieldset_fields))
+
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.layout = Layout(
+            *fieldsets
+        )
 
     def get_fields_by_object_type(self):
         """
@@ -278,7 +298,7 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
         return [
             (
                 object_type,
-                [self[self.get_field_name(object_type, prop)] for prop in props],
+                [self[self.get_field_name(object_type, prop)] for prop in props if prop.is_value_property()],
             )
             for object_type, props in self.get_properties_by_object_type()
         ]
@@ -316,6 +336,17 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
         field_instance = field_class(**self.get_field_kwargs(prop))
 
         return field_instance
+
+    def non_field_value_for_property(self, prop):
+        non_value_input_type_mapping = {
+            models.WorksObjectProperty.INPUT_TYPE_TITLE: lambda prop: HTML(
+                f"<h5>{prop.name}</h5>"),
+        }
+        try:
+            input_func = non_value_input_type_mapping[prop.input_type]
+            return input_func(prop)
+        except KeyError as e:
+            raise KeyError(f"Field of type {e} is not supported.")
 
     def get_field_kwargs(self, prop):
         """
@@ -432,12 +463,14 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
 
     def save(self):
         for works_object_type, prop in self.get_properties():
-            services.set_object_property_value(
-                permit_request=self.instance,
-                object_type=works_object_type,
-                prop=prop,
-                value=self.cleaned_data[self.get_field_name(works_object_type, prop)],
-            )
+            if prop.is_value_property():
+                services.set_object_property_value(
+                    permit_request=self.instance,
+                    object_type=works_object_type,
+                    prop=prop,
+                    value=self.cleaned_data[
+                        self.get_field_name(works_object_type, prop)],
+                )
 
 
 class WorksObjectsAppendicesForm(WorksObjectsPropertiesForm):
@@ -460,11 +493,10 @@ class WorksObjectsAppendicesForm(WorksObjectsPropertiesForm):
 
 
 def check_existing_email(email, user):
-
     if (
         User.objects.filter(email=email)
-        .exclude(Q(id=user.id) if user else Q())
-        .exists()
+            .exclude(Q(id=user.id) if user else Q())
+            .exists()
     ):
         raise forms.ValidationError(_("Cet email est déjà utilisé."))
 
@@ -472,10 +504,9 @@ def check_existing_email(email, user):
 
 
 class NewDjangoAuthUserForm(UserCreationForm):
-
-    first_name = forms.CharField(label=_("Prénom"), max_length=30,)
-    last_name = forms.CharField(label=_("Nom"), max_length=150,)
-    email = forms.EmailField(label=_("Email"), max_length=254,)
+    first_name = forms.CharField(label=_("Prénom"), max_length=30, )
+    last_name = forms.CharField(label=_("Nom"), max_length=150, )
+    email = forms.EmailField(label=_("Email"), max_length=254, )
     required_css_class = "required"
 
     def clean_email(self):
@@ -529,7 +560,6 @@ class DjangoAuthUserForm(forms.ModelForm):
 
 
 class GenericAuthorForm(forms.ModelForm):
-
     required_css_class = "required"
     address = forms.CharField(
         max_length=100, label=_("Adresse"), widget=AddressWidget()
@@ -615,18 +645,18 @@ class PermitRequestActorForm(forms.ModelForm):
     first_name = forms.CharField(
         max_length=150,
         label=_("Prénom"),
-        widget=forms.TextInput(attrs={"placeholder": "ex: Marcel",}),
+        widget=forms.TextInput(attrs={"placeholder": "ex: Marcel", }),
     )
     last_name = forms.CharField(
         max_length=100,
         label=_("Nom"),
-        widget=forms.TextInput(attrs={"placeholder": "ex: Dupond",}),
+        widget=forms.TextInput(attrs={"placeholder": "ex: Dupond", }),
     )
     phone = forms.CharField(
         min_length=10,
         max_length=16,
         label=_("Téléphone"),
-        widget=forms.TextInput(attrs={"placeholder": "ex: 024 111 22 22",}),
+        widget=forms.TextInput(attrs={"placeholder": "ex: 024 111 22 22", }),
         validators=[
             RegexValidator(
                 regex=r"^(((\+41)\s?)|(0))?(\d{2})\s?(\d{3})\s?(\d{2})\s?(\d{2})$",
@@ -639,7 +669,7 @@ class PermitRequestActorForm(forms.ModelForm):
     email = forms.EmailField(
         max_length=100,
         label=_("Email"),
-        widget=forms.TextInput(attrs={"placeholder": "ex: exemple@exemple.com",}),
+        widget=forms.TextInput(attrs={"placeholder": "ex: exemple@exemple.com", }),
     )
     address = forms.CharField(
         max_length=100,
@@ -660,7 +690,7 @@ class PermitRequestActorForm(forms.ModelForm):
     city = forms.CharField(
         max_length=100,
         label=_("Ville"),
-        widget=forms.TextInput(attrs={"placeholder": "ex: Yverdon",}),
+        widget=forms.TextInput(attrs={"placeholder": "ex: Yverdon", }),
     )
     company_name = forms.CharField(
         required=False,
@@ -740,7 +770,7 @@ class PermitRequestAdditionalInformationForm(forms.ModelForm):
         model = models.PermitRequest
         fields = ["is_public", "status"]
         widgets = {
-            "is_public": forms.RadioSelect(choices=models.PUBLIC_TYPE_CHOICES,),
+            "is_public": forms.RadioSelect(choices=models.PUBLIC_TYPE_CHOICES, ),
         }
 
     def __init__(self, *args, **kwargs):
@@ -814,7 +844,8 @@ class PermitRequestAdditionalInformationForm(forms.ModelForm):
                 object_type,
                 [self[self.get_field_name(object_type.id, prop.id)] for prop in props],
             )
-            for object_type, props in services.get_permit_request_amend_custom_properties_by_object_type(
+            for object_type, props in
+            services.get_permit_request_amend_custom_properties_by_object_type(
                 self.instance
             )
         ]
@@ -843,7 +874,6 @@ class PermitRequestAdditionalInformationForm(forms.ModelForm):
 
 # extend django gis osm openlayers widget
 class GeometryWidget(geoforms.OSMWidget):
-
     template_name = "geometrywidget/geometrywidget.html"
     map_srid = 2056
 
@@ -860,7 +890,6 @@ class GeometryWidget(geoforms.OSMWidget):
 
 
 class PermitRequestGeoTimeForm(forms.ModelForm):
-
     required_css_class = "required"
     starts_at = forms.DateTimeField(
         label=_("Date planifiée de début"),
@@ -941,8 +970,8 @@ class PermitRequestGeoTimeForm(forms.ModelForm):
     def get_widget_options(self, permit_request):
         works_object_type_choices = (
             services.get_works_object_type_choices(permit_request)
-            .select_related("works_object_type__works_object")
-            .order_by("-works_object_type__works_object__wms_layers_order")
+                .select_related("works_object_type__works_object")
+                .order_by("-works_object_type__works_object__wms_layers_order")
             if permit_request
             else []
         )
@@ -1108,10 +1137,10 @@ class PermitRequestClassifyForm(forms.ModelForm):
             (status, label)
             for status, label in models.PermitRequest.STATUS_CHOICES
             if status
-            in [
-                models.PermitRequest.STATUS_APPROVED,
-                models.PermitRequest.STATUS_REJECTED,
-            ]
+               in [
+                   models.PermitRequest.STATUS_APPROVED,
+                   models.PermitRequest.STATUS_REJECTED,
+               ]
         ),
         widget=forms.HiddenInput,
         disabled=True,

@@ -116,7 +116,7 @@ class PermitDepartment(models.Model):
     is_default_validator = models.BooleanField(
         _("sélectionné par défaut pour les validations"), default=False
     )
-    integrator = models.IntegerField(_("Intégrateur responsable"), default=0,)
+    integrator = models.IntegerField(_("Intégrateur responsable"), default=0, )
     is_integrator_admin = models.BooleanField(
         "Intégrateur (accès à l'admin de django)", default=False
     )
@@ -216,11 +216,11 @@ class PermitAuthor(models.Model):
             )
         ],
     )
-    address = models.CharField(_("Rue"), max_length=100,)
+    address = models.CharField(_("Rue"), max_length=100, )
     zipcode = models.PositiveIntegerField(
         _("NPA"), validators=[MinValueValidator(1000), MaxValueValidator(9999)],
     )
-    city = models.CharField(_("Ville"), max_length=100,)
+    city = models.CharField(_("Ville"), max_length=100, )
     phone_first = models.CharField(
         _("Téléphone principal"),
         max_length=20,
@@ -250,11 +250,9 @@ class PermitAuthor(models.Model):
         verbose_name_plural = _("3.2 Consultation des auteurs")
 
     def get_absolute_url(self):
-
         return reverse("permits:genericauthorview", args=[str(self.id)])
 
     def __str__(self):
-
         return (
             str(self.user.first_name) + " " + str(self.user.last_name)
             if self.user
@@ -265,15 +263,15 @@ class PermitAuthor(models.Model):
 class PermitActor(models.Model):
     """Contacts"""
 
-    first_name = models.CharField(_("Prénom"), max_length=150,)
-    last_name = models.CharField(_("Nom"), max_length=100,)
+    first_name = models.CharField(_("Prénom"), max_length=150, )
+    last_name = models.CharField(_("Nom"), max_length=100, )
     company_name = models.CharField(_("Entreprise"), max_length=100, blank=True)
     vat_number = models.CharField(_("Numéro TVA"), max_length=19, blank=True)
-    address = models.CharField(_("Adresse"), max_length=100,)
-    zipcode = models.PositiveIntegerField(_("NPA"),)
-    city = models.CharField(_("Ville"), max_length=100,)
-    phone = models.CharField(_("Téléphone"), max_length=20,)
-    email = models.EmailField(_("Email"),)
+    address = models.CharField(_("Adresse"), max_length=100, )
+    zipcode = models.PositiveIntegerField(_("NPA"), )
+    city = models.CharField(_("Ville"), max_length=100, )
+    phone = models.CharField(_("Téléphone"), max_length=20, )
+    email = models.EmailField(_("Email"), )
     history = HistoricalRecords()
 
     class Meta:
@@ -297,7 +295,6 @@ class WorksObjectTypeChoice(models.Model):
 
 
 class PermitActorType(models.Model):
-
     type = models.PositiveSmallIntegerField(
         _("type de contact"), choices=ACTOR_TYPE_CHOICES, default=ACTOR_TYPE_OTHER
     )
@@ -722,6 +719,16 @@ class WorksObjectProperty(models.Model):
     def __str__(self):
         return self.name
 
+    def is_value_property(self):
+        return self.input_type in [WorksObjectProperty.INPUT_TYPE_TEXT,
+                                   WorksObjectProperty.INPUT_TYPE_CHECKBOX,
+                                   WorksObjectProperty.INPUT_TYPE_NUMBER,
+                                   WorksObjectProperty.INPUT_TYPE_FILE,
+                                   WorksObjectProperty.INPUT_TYPE_ADDRESS,
+                                   WorksObjectProperty.INPUT_TYPE_DATE,
+                                   WorksObjectProperty.INPUT_TYPE_LIST_SINGLE,
+                                   WorksObjectProperty.INPUT_TYPE_LIST_MULTIPLE]
+
     def clean(self):
         if self.input_type in [INPUT_TYPE_LIST_SINGLE, INPUT_TYPE_LIST_MULTIPLE]:
             if not self.choices:
@@ -970,7 +977,6 @@ class QgisGeneratedDocument(models.Model):
 
 
 class TemplateCustomization(models.Model):
-
     templatename = models.CharField(
         _("Identifiant"),
         max_length=64,
