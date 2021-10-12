@@ -663,6 +663,7 @@ class WorksObjectProperty(models.Model):
     INPUT_TYPE_DATE = "date"
     INPUT_TYPE_LIST_SINGLE = INPUT_TYPE_LIST_SINGLE
     INPUT_TYPE_LIST_MULTIPLE = INPUT_TYPE_LIST_MULTIPLE
+    INPUT_TYPE_TITLE = "title"
     INPUT_TYPE_CHOICES = (
         (INPUT_TYPE_TEXT, _("Texte")),
         (INPUT_TYPE_CHECKBOX, _("Case à cocher")),
@@ -672,6 +673,7 @@ class WorksObjectProperty(models.Model):
         (INPUT_TYPE_DATE, _("Date")),
         (INPUT_TYPE_LIST_SINGLE, _("Choix simple")),
         (INPUT_TYPE_LIST_MULTIPLE, _("Choix multiple")),
+        (INPUT_TYPE_TITLE, _("Titre")),
     )
     integrator = models.ForeignKey(
         Group,
