@@ -295,13 +295,17 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
         """
         Return a list of tuples `(WorksObjectType, List[Field])` for each object type and their properties.
         """
-        return [
-            (
-                object_type,
-                [self[self.get_field_name(object_type, prop)] for prop in props if prop.is_value_property()],
-            )
-            for object_type, props in self.get_properties_by_object_type()
-        ]
+
+        object_type_fields = []
+        for object_type, props in self.get_properties_by_object_type():
+            fields = []
+            for prop in props:
+                if prop.is_value_property():
+                    fields.append(self[self.get_field_name(object_type, prop)])
+                else:
+                    fields.append({'repr': prop.name})
+            object_type_fields.append((object_type, fields))
+        return object_type_fields
 
     def get_properties_by_object_type(self):
         """

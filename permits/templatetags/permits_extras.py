@@ -77,6 +77,8 @@ def human_field_value(value):
         return _("Oui") if value else _("Non")
     elif isinstance(value, list):
         return render_to_string("permits/_field_value_list.html", {"values": value})
+    elif value is None:
+        return None
     elif not value:
         return "-"
 
