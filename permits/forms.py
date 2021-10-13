@@ -38,6 +38,18 @@ input_type_mapping = {
 }
 
 
+def _title_html_representation(prop):
+    base = f"<h5>{prop.name}</h5>"
+    if prop.help_text:
+        base = f"{base}<small class='text-muted'>{prop.help_text}</small>"
+    return base
+
+
+non_value_input_type_mapping = {
+    models.WorksObjectProperty.INPUT_TYPE_TITLE: _title_html_representation,
+}
+
+
 class AddressWidget(forms.widgets.TextInput):
     @property
     def media(self):
@@ -291,6 +303,12 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
             *fieldsets
         )
 
+    def get_field_representation(self, object_type, prop):
+        if prop.is_value_property():
+            return self[self.get_field_name(object_type, prop)]
+        else:
+            return {'repr': non_value_input_type_mapping.get(prop.input_type, {})(prop)}
+
     def get_fields_by_object_type(self):
         """
         Return a list of tuples `(WorksObjectType, List[Field])` for each object type and their properties.
@@ -300,10 +318,7 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
         for object_type, props in self.get_properties_by_object_type():
             fields = []
             for prop in props:
-                if prop.is_value_property():
-                    fields.append(self[self.get_field_name(object_type, prop)])
-                else:
-                    fields.append({'repr': prop.name})
+                fields.append(self.get_field_representation(object_type, prop))
             object_type_fields.append((object_type, fields))
         return object_type_fields
 
@@ -342,13 +357,9 @@ class WorksObjectsPropertiesForm(PartialValidationMixin, forms.Form):
         return field_instance
 
     def non_field_value_for_property(self, prop):
-        non_value_input_type_mapping = {
-            models.WorksObjectProperty.INPUT_TYPE_TITLE: lambda prop: HTML(
-                f"<h5>{prop.name}</h5>"),
-        }
         try:
             input_func = non_value_input_type_mapping[prop.input_type]
-            return input_func(prop)
+            return HTML(f"<div class='form-group'>{input_func(prop)}</div>")
         except KeyError as e:
             raise KeyError(f"Field of type {e} is not supported.")
 

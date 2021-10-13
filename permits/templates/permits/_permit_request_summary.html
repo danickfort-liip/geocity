@@ -12,7 +12,7 @@
         {{ field.value|human_field_value }}
       </dd>
       {% else %}
-        <i><dt>{{ field.repr }}</dt></i>
+        {{ field.repr|safe }}
       {% endif %}
     {% endfor %}
 
